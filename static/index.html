@@ -1,0 +1,135 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Find the Right Talk — KubeCon NA 2026</title>
+<style>
+  body { font-family: system-ui, -apple-system, sans-serif; max-width: 860px;
+         margin: 2rem auto; padding: 0 1rem; color: #1a1a1a; line-height: 1.5; }
+  h1 { font-size: 1.6rem; margin-bottom: .2rem; }
+  .sub { color: #555; margin-top: 0; font-size: .95rem; }
+  .badge { display: inline-block; font-size: .8rem; padding: .1rem .5rem;
+           border-radius: 1rem; background: #eee; margin-left: .5rem; }
+  .badge.es { background: #d6f5d6; } .badge.offline { background: #ffe9b0; }
+  textarea, input[type=text] { width: 100%; padding: .6rem; font-size: 1rem;
+           box-sizing: border-box; }
+  button { padding: .6rem 1.1rem; font-size: 1rem; cursor: pointer; margin: .4rem .4rem 0 0; }
+  .persona { background: #f0f0f0; border: 1px solid #ccc; }
+  .talk { border: 1px solid #ddd; border-radius: .5rem; padding: .7rem .9rem; margin: .6rem 0; }
+  .talk h3 { margin: 0 0 .2rem; font-size: 1.05rem; }
+  .meta { color: #555; font-size: .85rem; }
+  .tags { color: #666; font-size: .82rem; }
+  .score { float: right; font-size: .85rem; color: #888; }
+  .tbc { color: #8a6d00; font-weight: 600; }
+  .clash { border-color: #d99; background: #fff7f7; }
+  section { margin-top: 1.8rem; }
+  #status { font-size: .9rem; color: #555; }
+  .err { color: #b00; }
+</style>
+</head>
+<body>
+<h1>Find the Right Talk <span id="modeBadge" class="badge">…</span></h1>
+<p class="sub">KubeCon + CloudNativeCon NA 2026 — seed of 26 talks (not the full
+programme). Type an interest, get ranked talks, then build a personal schedule
+that resolves time clashes into a watch-later queue.</p>
+
+<label for="interest"><strong>Your interest</strong></label>
+<input type="text" id="interest" placeholder="e.g. vLLM GPU scheduling tail latency"
+       value="vLLM GPU scheduling tail latency">
+<div>
+  <button id="searchBtn">Search talks</button>
+  <button id="scheduleBtn">Build my schedule</button>
+  <button class="persona" data-interest="vLLM GPU scheduling tail latency">Persona: inference engineer</button>
+  <button class="persona" data-interest="MCP agents authorization">Persona: agent builder / MCP</button>
+</div>
+<p id="status"></p>
+
+<section id="resultsSection" hidden>
+  <h2>Ranked talks</h2>
+  <div id="results"></div>
+</section>
+
+<section id="scheduleSection" hidden>
+  <h2>Your schedule</h2>
+  <div id="schedule"></div>
+  <h2>Watch later — recording queue</h2>
+  <div id="watchLater"></div>
+</section>
+
+<script>
+const $ = id => document.getElementById(id);
+const statusEl = $('status');
+
+function timeLabel(t) {
+  if (t.time_tbc) return '<span class="tbc">time TBC — recording queue</span>';
+  const when = [t.day, t.date, t.start_time + (t.end_time ? '–' + t.end_time : '')]
+    .filter(Boolean).join(' · ');
+  return when + (t.room ? ' · ' + t.room : '');
+}
+
+function talkCard(t, extra) {
+  const score = t.score !== undefined ? `<span class="score">score ${t.score}</span>` : '';
+  return `<div class="talk${extra ? ' clash' : ''}">${score}<h3>${t.title}</h3>
+    <div class="meta">${timeLabel(t)}${t.track ? ' · ' + t.track : ''}</div>
+    <p>${t.abstract}</p>
+    <div class="tags">${(t.tags || []).join(' · ')}</div>
+    ${extra ? `<div class="meta">${extra}</div>` : ''}</div>`;
+}
+
+async function post(path, body) {
+  const r = await fetch(path, { method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body) });
+  if (!r.ok) throw new Error((await r.json()).error || r.statusText);
+  return r.json();
+}
+
+function setMode(mode) {
+  const b = $('modeBadge');
+  b.textContent = mode === 'elasticsearch' ? 'Elasticsearch' : 'Offline fallback';
+  b.className = 'badge ' + (mode === 'elasticsearch' ? 'es' : 'offline');
+}
+
+async function doSearch() {
+  const interest = $('interest').value.trim();
+  if (!interest) { statusEl.textContent = 'Type an interest first.'; return; }
+  statusEl.textContent = 'Searching…';
+  try {
+    const d = await post('/api/search', { interest });
+    setMode(d.mode);
+    $('results').innerHTML = d.results.length
+      ? d.results.map(t => talkCard(t)).join('')
+      : '<p>No talks match that interest in this 26-talk seed.</p>';
+    $('resultsSection').hidden = false;
+    statusEl.textContent = `${d.results.length} talks · mode: ${d.mode}`;
+  } catch (e) { statusEl.innerHTML = `<span class="err">Search failed: ${e.message}</span>`; }
+}
+
+async function doSchedule() {
+  const interest = $('interest').value.trim();
+  if (!interest) { statusEl.textContent = 'Type an interest first.'; return; }
+  statusEl.textContent = 'Building schedule…';
+  try {
+    const d = await post('/api/schedule', { interest });
+    setMode(d.mode);
+    $('schedule').innerHTML = d.schedule.length
+      ? d.schedule.map(t => talkCard(t)).join('')
+      : '<p>Nothing scheduled — no timed talks matched.</p>';
+    $('watchLater').innerHTML = d.watch_later.length
+      ? d.watch_later.map(t => talkCard(t, t.reason)).join('')
+      : '<p>Watch-later queue is empty.</p>';
+    $('scheduleSection').hidden = false;
+    statusEl.textContent = `${d.schedule.length} scheduled · ${d.clash_skipped.length} skipped (clash) · ${d.watch_later.length} in watch-later · mode: ${d.mode}`;
+  } catch (e) { statusEl.innerHTML = `<span class="err">Schedule failed: ${e.message}</span>`; }
+}
+
+$('searchBtn').onclick = doSearch;
+$('scheduleBtn').onclick = doSchedule;
+document.querySelectorAll('.persona').forEach(b => b.onclick = () => {
+  $('interest').value = b.dataset.interest; doSearch();
+});
+fetch('/api/health').then(r => r.json()).then(h => setMode(h.mode)).catch(() => setMode('offline'));
+</script>
+</body>
+</html>

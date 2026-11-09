@@ -1,0 +1,25 @@
+# Elasticsearch (single node, local demo only) for the hackathon
+# "Find the Right Talk" — pairs with elasticsearch-mapping.json and seed-and-search.py
+# Monday: docker compose up -d  (then: python3 seed-and-search.py --es http://localhost:9200)
+# Security is OFF on purpose for a local demo on your own laptop; do not expose 9200 publicly.
+# ES 8.x: dense_vector + knn in the mapping need 8.x. 8.15+ works with the mapping as written.
+services:
+  elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:8.15.0
+    container_name: kubecon-es
+    environment:
+      - discovery.type=single-node
+      - xpack.security.enabled=false
+      - ES_JAVA_OPTS=-Xms1g -Xmx1g
+    ports:
+      - "9200:9200"
+    volumes:
+      - es-data:/usr/share/elasticsearch/data
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:9200/_cluster/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+
+volumes:
+  es-data:
